@@ -1,28 +1,40 @@
 import { useState, useCallback, DragEvent, ChangeEvent } from "react";
 
-type UploadStatus = "idle" | "uploading" | "success" | "error";
+type FileStatus = "pending" | "uploading" | "success" | "error";
 
-interface UploadResult {
-  id: string;
-  status: string;
+interface PerFileState {
+  file: File;
+  status: FileStatus;
+  progress: number;
+  error?: string;
+  result?: { id: string; status: string };
 }
 
-interface UploadError {
-  error: string;
+interface UploadResponse {
+  results: Array<{ id: string; status: string }>;
+  errors?: Array<{ fileName: string; error: string }>;
+}
+
+function isMediaFile(file: File): boolean {
+  return file.type.startsWith("image/") || file.type.startsWith("video/");
 }
 
 export function UploadZone() {
-  const [status, setStatus] = useState<UploadStatus>("idle");
-  const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<UploadResult | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [files, setFiles] = useState<PerFileState[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
-  const upload = useCallback(async (file: File) => {
-    setStatus("uploading");
-    setProgress(0);
-    setResult(null);
-    setErrorMessage(null);
+  const activeCount = files.filter((f) => f.status === "uploading").length;
+  const completedCount = files.filter((f) => f.status === "success").length;
+  const errorCount = files.filter((f) => f.status === "error").length;
+
+  const uploadFile = useCallback(async (fileState: PerFileState) => {
+    const { file } = fileState;
+
+    setFiles((prev) =>
+      prev.map((f) =>
+        f.file === file ? { ...f, status: "uploading", progress: 0 } : f
+      )
+    );
 
     const formData = new FormData();
     formData.append("file", file);
@@ -32,19 +44,22 @@ export function UploadZone() {
 
       xhr.upload.addEventListener("progress", (e) => {
         if (e.lengthComputable) {
-          setProgress(Math.round((e.loaded / e.total) * 100));
+          const progress = Math.round((e.loaded / e.total) * 100);
+          setFiles((prev) =>
+            prev.map((f) => (f.file === file ? { ...f, progress } : f))
+          );
         }
       });
 
-      const response = await new Promise<UploadResult>((resolve, reject) => {
+      const response = await new Promise<UploadResponse>((resolve, reject) => {
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) {
             const data = JSON.parse(xhr.responseText);
-            resolve(data as UploadResult);
+            resolve(data as UploadResponse);
           } else {
             try {
-              const err = JSON.parse(xhr.responseText) as UploadError;
-              reject(new Error(err.error || "upload failed"));
+              const err = JSON.parse(xhr.responseText) as { error?: string };
+              reject(new Error(err.error || `upload failed: ${xhr.status}`));
             } catch {
               reject(new Error(`upload failed: ${xhr.status}`));
             }
@@ -57,39 +72,68 @@ export function UploadZone() {
         xhr.send(formData);
       });
 
-      setResult(response);
-      setStatus("success");
-      setProgress(100);
+      const myResult = response.results.find(
+        (r) =>
+          response.results.length === 1 ||
+          r.id ||
+          file.name
+      );
+
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.file === file
+            ? { ...f, status: "success", progress: 100, result: myResult }
+            : f
+        )
+      );
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "unknown error");
-      setStatus("error");
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.file === file
+            ? { ...f, status: "error", error: err instanceof Error ? err.message : "unknown error" }
+            : f
+        )
+      );
     }
   }, []);
+
+  const handleFiles = useCallback(
+    (fileList: FileList) => {
+      const validFiles = Array.from(fileList).filter(isMediaFile);
+      if (validFiles.length === 0) return;
+
+      const newFileStates: PerFileState[] = validFiles.map((file) => ({
+        file,
+        status: "pending",
+        progress: 0,
+      }));
+
+      setFiles((prev) => [...prev, ...newFileStates]);
+
+      newFileStates.forEach((fileState) => {
+        uploadFile(fileState);
+      });
+    },
+    [uploadFile]
+  );
 
   const handleDrop = useCallback(
     (e: DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       setIsDragging(false);
-
-      const file = e.dataTransfer.files[0];
-      if (file && (file.type.startsWith("image/") || file.type.startsWith("video/"))) {
-        upload(file);
-      } else {
-        setErrorMessage("Only images and videos are supported");
-        setStatus("error");
-      }
+      handleFiles(e.dataTransfer.files);
     },
-    [upload]
+    [handleFiles]
   );
 
   const handleFileInput = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        upload(file);
+      if (e.target.files) {
+        handleFiles(e.target.files);
+        e.target.value = "";
       }
     },
-    [upload]
+    [handleFiles]
   );
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -102,10 +146,11 @@ export function UploadZone() {
   }, []);
 
   const reset = useCallback(() => {
-    setStatus("idle");
-    setProgress(0);
-    setResult(null);
-    setErrorMessage(null);
+    setFiles([]);
+  }, []);
+
+  const removeFile = useCallback((file: File) => {
+    setFiles((prev) => prev.filter((f) => f.file !== file));
   }, []);
 
   return (
@@ -119,15 +164,16 @@ export function UploadZone() {
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
       >
-        {status === "idle" && (
+        {files.length === 0 && (
           <>
             <div style={styles.icon}>📁</div>
-            <p style={styles.label}>Drag & drop an image or video here</p>
+            <p style={styles.label}>Drag & drop images or videos here</p>
             <p style={styles.subLabel}>or</p>
             <label style={styles.button}>
               Browse Files
               <input
                 type="file"
+                multiple
                 accept="image/*,video/*"
                 onChange={handleFileInput}
                 style={styles.hiddenInput}
@@ -136,40 +182,62 @@ export function UploadZone() {
           </>
         )}
 
-        {status === "uploading" && (
-          <>
-            <div style={styles.spinner} />
-            <p style={styles.label}>Uploading...</p>
-            <div style={styles.progressBar}>
-              <div style={{ ...styles.progressFill, width: `${progress}%` }} />
-            </div>
-            <p style={styles.progressText}>{progress}%</p>
-          </>
-        )}
-
-        {status === "success" && result && (
-          <>
-            <div style={styles.successIcon}>✓</div>
-            <p style={styles.label}>Upload complete</p>
-            <p style={styles.resultId}>ID: {result.id}</p>
-            <p style={styles.resultStatus}>Status: {result.status}</p>
-            <button onClick={reset} style={styles.resetButton}>
-              Upload Another
-            </button>
-          </>
-        )}
-
-        {status === "error" && (
-          <>
-            <div style={styles.errorIcon}>✗</div>
-            <p style={styles.label}>Upload failed</p>
-            <p style={styles.errorMessage}>{errorMessage}</p>
-            <button onClick={reset} style={styles.resetButton}>
-              Try Again
-            </button>
-          </>
+        {files.length > 0 && (
+          <div style={styles.fileList}>
+            {files.map((fileState) => (
+              <div key={fileState.file.name} style={styles.fileRow}>
+                <div style={styles.fileInfo}>
+                  <span style={styles.fileName}>{fileState.file.name}</span>
+                  {fileState.status === "uploading" && (
+                    <div style={styles.inlineProgress}>
+                      <div
+                        style={{
+                          ...styles.inlineProgressFill,
+                          width: `${fileState.progress}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                  {fileState.status === "success" && (
+                    <span style={styles.successText}>✓ uploaded</span>
+                  )}
+                  {fileState.status === "error" && (
+                    <span style={styles.errorText}>
+                      ✗ {fileState.error}
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => removeFile(fileState.file)}
+                  style={styles.removeBtn}
+                  aria-label={`Remove ${fileState.file.name}`}
+                >
+                  ✗
+                </button>
+              </div>
+            ))}
+          </div>
         )}
       </div>
+
+      {files.length > 0 && (
+        <div style={styles.actions}>
+          <div style={styles.stats}>
+            {completedCount > 0 && (
+              <span style={styles.successText}>{completedCount} uploaded</span>
+            )}
+            {errorCount > 0 && (
+              <span style={styles.errorText}>{errorCount} failed</span>
+            )}
+            {activeCount > 0 && (
+              <span style={styles.uploadingText}>{activeCount} uploading...</span>
+            )}
+          </div>
+          <button onClick={reset} style={styles.resetButton}>
+            Clear
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -177,7 +245,8 @@ export function UploadZone() {
 const styles: Record<string, Record<string, string>> = {
   container: {
     display: "flex",
-    justifyContent: "center",
+    flexDirection: "column",
+    gap: "0.75rem",
     padding: "2rem",
   },
   zone: {
@@ -186,8 +255,9 @@ const styles: Record<string, Record<string, string>> = {
     alignItems: "center",
     justifyContent: "center",
     width: "100%",
-    maxWidth: "480px",
-    padding: "3rem 2rem",
+    maxWidth: "600px",
+    minHeight: "120px",
+    padding: "1.5rem 2rem",
     border: "2px dashed #ccc",
     borderRadius: "12px",
     backgroundColor: "#fafafa",
@@ -199,19 +269,19 @@ const styles: Record<string, Record<string, string>> = {
     backgroundColor: "#f0f7ff",
   },
   icon: {
-    fontSize: "3rem",
-    marginBottom: "1rem",
+    fontSize: "2rem",
+    marginBottom: "0.5rem",
   },
   label: {
-    fontSize: "1.125rem",
+    fontSize: "1rem",
     fontWeight: "500",
     color: "#1a1a1a",
-    margin: "0 0 0.5rem 0",
+    margin: "0 0 0.25rem 0",
   },
   subLabel: {
     fontSize: "0.875rem",
     color: "#666",
-    margin: "0.25rem 0",
+    margin: "0.125rem 0",
   },
   button: {
     display: "inline-block",
@@ -227,69 +297,85 @@ const styles: Record<string, Record<string, string>> = {
   hiddenInput: {
     display: "none",
   },
-  spinner: {
-    width: "2rem",
-    height: "2rem",
-    border: "3px solid #e0e0e0",
-    borderTopColor: "#0070f3",
-    borderRadius: "50%",
-    animation: "spin 1s linear infinite",
-    marginBottom: "1rem",
+  fileList: {
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.5rem",
   },
-  progressBar: {
+  fileRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "0.5rem 0",
+    borderBottom: "1px solid #eee",
+  },
+  fileInfo: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.25rem",
+    minWidth: "0",
+    flex: "1",
+  },
+  fileName: {
+    fontSize: "0.875rem",
+    color: "#1a1a1a",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  inlineProgress: {
     width: "100%",
     maxWidth: "300px",
-    height: "8px",
+    height: "4px",
     backgroundColor: "#e0e0e0",
-    borderRadius: "4px",
+    borderRadius: "2px",
     overflow: "hidden",
-    marginTop: "1rem",
   },
-  progressFill: {
+  inlineProgressFill: {
     height: "100%",
     backgroundColor: "#0070f3",
     transition: "width 0.2s ease",
   },
-  progressText: {
-    fontSize: "0.875rem",
-    color: "#666",
-    marginTop: "0.5rem",
-  },
-  successIcon: {
-    fontSize: "3rem",
-    color: "#10b981",
-    marginBottom: "1rem",
-  },
-  resultId: {
+  successText: {
     fontSize: "0.75rem",
-    color: "#888",
-    fontFamily: "monospace",
-    margin: "0.25rem 0",
+    color: "#10b981",
   },
-  resultStatus: {
-    fontSize: "0.875rem",
+  errorText: {
+    fontSize: "0.75rem",
+    color: "#ef4444",
+  },
+  uploadingText: {
+    fontSize: "0.75rem",
     color: "#666",
-    margin: "0.25rem 0 1rem 0",
+  },
+  removeBtn: {
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    color: "#999",
+    fontSize: "0.875rem",
+    padding: "0.25rem 0.5rem",
+  },
+  actions: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    maxWidth: "600px",
+  },
+  stats: {
+    display: "flex",
+    gap: "1rem",
   },
   resetButton: {
-    padding: "0.5rem 1rem",
+    padding: "0.375rem 0.75rem",
     fontSize: "0.875rem",
     fontWeight: "500",
-    color: "#0070f3",
+    color: "#666",
     backgroundColor: "transparent",
-    border: "1px solid #0070f3",
+    border: "1px solid #ddd",
     borderRadius: "6px",
     cursor: "pointer",
-    marginTop: "0.5rem",
-  },
-  errorIcon: {
-    fontSize: "3rem",
-    color: "#ef4444",
-    marginBottom: "1rem",
-  },
-  errorMessage: {
-    fontSize: "0.875rem",
-    color: "#ef4444",
-    margin: "0.25rem 0 1rem 0",
   },
 };
