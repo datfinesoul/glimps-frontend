@@ -13,6 +13,10 @@ export default defineConfig({
         target: apiUrl,
         changeOrigin: true,
       },
+      '/media': {
+        target: apiUrl,
+        changeOrigin: true,
+      },
     },
   },
 })
