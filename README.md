@@ -2,13 +2,18 @@
 
 Vite + React + TypeScript SPA for Glimps personal image library.
 
-## Tool Requirements
+## Development
 
-- **Node.js** 22+
-- **pnpm** 9+
+The harness repo (`glimps/`) runs all services via Docker Compose. See the harness [AGENTS.md](../AGENTS.md) for the standard development workflow.
 
-## Quick Start
+**Via Docker Compose:**
+```bash
+cd glimps
+docker compose up -d
+# Frontend available at http://localhost:3010
+```
 
+**Local iteration (debugging only):**
 ```bash
 cp .env.example .env
 pnpm install
@@ -17,27 +22,13 @@ pnpm run dev
 
 ## Commands
 
-| Command | Purpose |
-|---------|---------|
-| `pnpm run dev` | Start dev server |
-| `pnpm run build` | Production build |
-| `pnpm run preview` | Preview production build |
-| `pnpm run lint` | ESLint |
-| `pnpm run typecheck` | TypeScript |
-| `pnpm run test` | Vitest |
-
-## "Works at All" Test
-
-```bash
-pnpm install
-pnpm run build
-```
-
-Build must succeed with no errors.
-
-## Service Description
-
-Frontend SPA connects to the Glimps backend API. Dev server runs on port 5173 (Vite default).
+| Command | Context | Purpose |
+|---------|---------|---------|
+| `pnpm run lint` | docker exec or local | ESLint |
+| `pnpm run typecheck` | docker exec or local | TypeScript |
+| `pnpm run test` | docker exec or local | Vitest |
+| `pnpm run build` | docker exec or local | Production build |
+| `pnpm run preview` | local only | Preview production build |
 
 ## Stack
 
