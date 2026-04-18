@@ -1,11 +1,12 @@
-import { useState, useCallback, DragEvent, ChangeEvent } from "react";
+import { useState, useCallback, useRef, DragEvent, ChangeEvent } from "react";
 
-type FileStatus = "pending" | "uploading" | "success" | "duplicate" | "error";
+type FileStatus = "pending" | "uploading" | "success" | "duplicate" | "rateLimited" | "error";
 
 interface PerFileState {
   file: File;
   status: FileStatus;
   progress: number;
+  retryAfter?: number;
   error?: string;
   result?: { id: string; status: string };
 }
@@ -15,6 +16,8 @@ interface UploadResponse {
   errors?: Array<{ fileName: string; error: string }>;
 }
 
+const MAX_CONCURRENT = 10;
+
 function isMediaFile(file: File): boolean {
   return file.type.startsWith("image/") || file.type.startsWith("video/");
 }
@@ -22,86 +25,127 @@ function isMediaFile(file: File): boolean {
 export function UploadZone() {
   const [files, setFiles] = useState<PerFileState[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const retryTimers = useRef<Map<File, ReturnType<typeof setTimeout>>>(new Map());
 
   const activeCount = files.filter((f) => f.status === "uploading").length;
   const completedCount = files.filter((f) => f.status === "success").length;
   const duplicateCount = files.filter((f) => f.status === "duplicate").length;
+  const rateLimitedCount = files.filter((f) => f.status === "rateLimited").length;
   const errorCount = files.filter((f) => f.status === "error").length;
 
-  const uploadFile = useCallback(async (fileState: PerFileState) => {
-    const { file } = fileState;
+  const uploadFile = useCallback(
+    async (
+      fileState: PerFileState,
+      queueNext: () => void
+    ) => {
+      const { file } = fileState;
 
-    setFiles((prev) =>
-      prev.map((f) =>
-        f.file === file ? { ...f, status: "uploading", progress: 0 } : f
-      )
-    );
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.file === file ? { ...f, status: "uploading", progress: 0 } : f
+        )
+      );
 
-    const formData = new FormData();
-    formData.append("file", file);
+      const formData = new FormData();
+      formData.append("file", file);
 
-    try {
-      const xhr = new XMLHttpRequest();
+      try {
+        const xhr = new XMLHttpRequest();
 
-      xhr.upload.addEventListener("progress", (e) => {
-        if (e.lengthComputable) {
-          const progress = Math.round((e.loaded / e.total) * 100);
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) {
+            const progress = Math.round((e.loaded / e.total) * 100);
+            setFiles((prev) =>
+              prev.map((f) => (f.file === file ? { ...f, progress } : f))
+            );
+          }
+        });
+
+        const response = await new Promise<UploadResponse>((resolve, reject) => {
+          xhr.onload = () => {
+            if (xhr.status === 429) {
+              const retryAfter = parseInt(xhr.getResponseHeader("Retry-After") || "30", 10);
+              reject({ status: 429, retryAfter: isNaN(retryAfter) ? 30 : retryAfter });
+            } else if (xhr.status >= 200 && xhr.status < 300) {
+              const data = JSON.parse(xhr.responseText);
+              resolve(data as UploadResponse);
+            } else {
+              try {
+                const err = JSON.parse(xhr.responseText) as { error?: string };
+                reject(new Error(err.error || `upload failed: ${xhr.status}`));
+              } catch {
+                reject(new Error(`upload failed: ${xhr.status}`));
+              }
+            }
+          };
+
+          xhr.onerror = () => reject(new Error("network error"));
+
+          xhr.open("POST", "/api/media/upload");
+          xhr.send(formData);
+        });
+
+        const myResult = response.results.find(
+          (r) => r.status === "duplicate" || r.status === "success"
+        );
+
+        if (myResult?.status === "duplicate") {
           setFiles((prev) =>
-            prev.map((f) => (f.file === file ? { ...f, progress } : f))
+            prev.map((f) =>
+              f.file === file
+                ? { ...f, status: "duplicate", progress: 100, result: myResult }
+                : f
+            )
+          );
+        } else {
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.file === file
+                ? { ...f, status: "success", progress: 100, result: myResult }
+                : f
+            )
           );
         }
-      });
+      } catch (err) {
+        if (
+          typeof err === "object" &&
+          err !== null &&
+          "status" in err &&
+          (err as { status: number }).status === 429
+        ) {
+          const retryAfter = (err as unknown as { retryAfter: number }).retryAfter;
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.file === file ? { ...f, status: "rateLimited", retryAfter } : f
+            )
+          );
 
-      const response = await new Promise<UploadResponse>((resolve, reject) => {
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            const data = JSON.parse(xhr.responseText);
-            resolve(data as UploadResponse);
-          } else {
-            try {
-              const err = JSON.parse(xhr.responseText) as { error?: string };
-              reject(new Error(err.error || `upload failed: ${xhr.status}`));
-            } catch {
-              reject(new Error(`upload failed: ${xhr.status}`));
-            }
-          }
-        };
+          const timer = setTimeout(() => {
+            retryTimers.current.delete(file);
+            uploadFile({ ...fileState, status: "pending" }, queueNext);
+          }, retryAfter * 1000);
+          retryTimers.current.set(file, timer);
+          queueNext();
+          return;
+        }
 
-        xhr.onerror = () => reject(new Error("network error"));
-
-        xhr.open("POST", "/api/media/upload");
-        xhr.send(formData);
-      });
-
-      const myResult = response.results.find((r) => r.status === "duplicate" || r.status === "success");
-
-      if (myResult?.status === "duplicate") {
         setFiles((prev) =>
           prev.map((f) =>
             f.file === file
-              ? { ...f, status: "duplicate", progress: 100, result: myResult }
-              : f
-          )
-        );
-      } else {
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.file === file
-              ? { ...f, status: "success", progress: 100, result: myResult }
+              ? {
+                  ...f,
+                  status: "error",
+                  error: err instanceof Error ? err.message : "unknown error",
+                }
               : f
           )
         );
       }
-    } catch (err) {
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.file === file
-            ? { ...f, status: "error", error: err instanceof Error ? err.message : "unknown error" }
-            : f
-        )
-      );
-    }
-  }, []);
+
+      queueNext();
+    },
+    []
+  );
 
   const handleFiles = useCallback(
     (fileList: FileList) => {
@@ -116,11 +160,26 @@ export function UploadZone() {
 
       setFiles((prev) => [...prev, ...newFileStates]);
 
-      newFileStates.forEach((fileState) => {
-        uploadFile(fileState);
-      });
+      let running = 0;
+      let idx = 0;
+
+      const queueNext = () => {
+        running--;
+        processNext();
+      };
+
+      const processNext = () => {
+        while (running < MAX_CONCURRENT && idx < newFileStates.length) {
+          const fileState = newFileStates[idx++];
+          const current = files.find((f) => f.file === fileState.file) || fileState;
+          running++;
+          uploadFile(current, queueNext);
+        }
+      };
+
+      processNext();
     },
-    [uploadFile]
+    [uploadFile, files]
   );
 
   const handleDrop = useCallback(
@@ -152,12 +211,22 @@ export function UploadZone() {
   }, []);
 
   const reset = useCallback(() => {
+    retryTimers.current.forEach((timer) => clearTimeout(timer));
+    retryTimers.current.clear();
     setFiles([]);
   }, []);
 
-  const removeFile = useCallback((file: File) => {
-    setFiles((prev) => prev.filter((f) => f.file !== file));
-  }, []);
+  const removeFile = useCallback(
+    (file: File) => {
+      const timer = retryTimers.current.get(file);
+      if (timer) {
+        clearTimeout(timer);
+        retryTimers.current.delete(file);
+      }
+      setFiles((prev) => prev.filter((f) => f.file !== file));
+    },
+    []
+  );
 
   return (
     <div style={styles.container}>
@@ -210,10 +279,13 @@ export function UploadZone() {
                   {fileState.status === "duplicate" && (
                     <span style={styles.warningText}>⚠ already uploaded</span>
                   )}
-                  {fileState.status === "error" && (
-                    <span style={styles.errorText}>
-                      ✗ {fileState.error}
+                  {fileState.status === "rateLimited" && (
+                    <span style={styles.warningText}>
+                      ⚠ rate limited, retrying in {fileState.retryAfter}s
                     </span>
+                  )}
+                  {fileState.status === "error" && (
+                    <span style={styles.errorText}>✗ {fileState.error}</span>
                   )}
                 </div>
                 <button
@@ -237,6 +309,9 @@ export function UploadZone() {
             )}
             {duplicateCount > 0 && (
               <span style={styles.warningText}>{duplicateCount} skipped</span>
+            )}
+            {rateLimitedCount > 0 && (
+              <span style={styles.warningText}>{rateLimitedCount} waiting...</span>
             )}
             {errorCount > 0 && (
               <span style={styles.errorText}>{errorCount} failed</span>
