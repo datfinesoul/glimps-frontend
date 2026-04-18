@@ -1,6 +1,6 @@
 import { useState, useCallback, DragEvent, ChangeEvent } from "react";
 
-type FileStatus = "pending" | "uploading" | "success" | "error";
+type FileStatus = "pending" | "uploading" | "success" | "duplicate" | "error";
 
 interface PerFileState {
   file: File;
@@ -25,6 +25,7 @@ export function UploadZone() {
 
   const activeCount = files.filter((f) => f.status === "uploading").length;
   const completedCount = files.filter((f) => f.status === "success").length;
+  const duplicateCount = files.filter((f) => f.status === "duplicate").length;
   const errorCount = files.filter((f) => f.status === "error").length;
 
   const uploadFile = useCallback(async (fileState: PerFileState) => {
@@ -72,20 +73,25 @@ export function UploadZone() {
         xhr.send(formData);
       });
 
-      const myResult = response.results.find(
-        (r) =>
-          response.results.length === 1 ||
-          r.id ||
-          file.name
-      );
+      const myResult = response.results.find((r) => r.status === "duplicate" || r.status === "success");
 
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.file === file
-            ? { ...f, status: "success", progress: 100, result: myResult }
-            : f
-        )
-      );
+      if (myResult?.status === "duplicate") {
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.file === file
+              ? { ...f, status: "duplicate", progress: 100, result: myResult }
+              : f
+          )
+        );
+      } else {
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.file === file
+              ? { ...f, status: "success", progress: 100, result: myResult }
+              : f
+          )
+        );
+      }
     } catch (err) {
       setFiles((prev) =>
         prev.map((f) =>
@@ -201,6 +207,9 @@ export function UploadZone() {
                   {fileState.status === "success" && (
                     <span style={styles.successText}>✓ uploaded</span>
                   )}
+                  {fileState.status === "duplicate" && (
+                    <span style={styles.warningText}>⚠ already uploaded</span>
+                  )}
                   {fileState.status === "error" && (
                     <span style={styles.errorText}>
                       ✗ {fileState.error}
@@ -225,6 +234,9 @@ export function UploadZone() {
           <div style={styles.stats}>
             {completedCount > 0 && (
               <span style={styles.successText}>{completedCount} uploaded</span>
+            )}
+            {duplicateCount > 0 && (
+              <span style={styles.warningText}>{duplicateCount} skipped</span>
             )}
             {errorCount > 0 && (
               <span style={styles.errorText}>{errorCount} failed</span>
@@ -344,6 +356,10 @@ const styles: Record<string, Record<string, string>> = {
   errorText: {
     fontSize: "0.75rem",
     color: "#ef4444",
+  },
+  warningText: {
+    fontSize: "0.75rem",
+    color: "#f59e0b",
   },
   uploadingText: {
     fontSize: "0.75rem",
