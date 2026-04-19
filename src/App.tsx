@@ -137,6 +137,29 @@ function App() {
             </span>
           )}
         </div>
+
+        {totalPages > 1 && (
+          <div style={{ ...paginationStyles.container, paddingTop: "1rem" }}>
+            <button
+              style={paginationStyles.button}
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={currentPage <= 1}
+            >
+              ‹ Prev
+            </button>
+            <span style={paginationStyles.pageInfo}>
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              style={paginationStyles.button}
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={currentPage >= totalPages}
+            >
+              Next ›
+            </button>
+          </div>
+        )}
+
         <MediaGrid items={mediaItems} loading={loading} onSelect={handleSelect} />
 
         {totalPages > 1 && (
