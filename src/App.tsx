@@ -50,11 +50,22 @@ function App() {
   const [totalItems, setTotalItems] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<MediaDetailResponse | null>(null);
+  const [typeFilter, setTypeFilter] = useState<"all" | "image" | "video">("all");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+
+  const buildQuery = useCallback((page: number) => {
+    const params = new URLSearchParams({ page: String(page), limit: "30" });
+    if (typeFilter !== "all") params.set("type", typeFilter);
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    return `/api/media?${params.toString()}`;
+  }, [typeFilter, dateFrom, dateTo]);
 
   const fetchMedia = useCallback(async (page: number) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/media?page=${page}&limit=30`);
+      const response = await fetch(buildQuery(page));
       if (response.ok) {
         const data: MediaListResponse = await response.json();
         setMediaItems(data.data);
@@ -67,7 +78,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [buildQuery]);
 
   useEffect(() => {
     fetchMedia(1);
@@ -136,6 +147,55 @@ function App() {
               {totalItems.toLocaleString()} items
             </span>
           )}
+        </div>
+
+        <div style={{ display: "flex", gap: "0.75rem", padding: "0.75rem 2rem", alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <span style={{ fontSize: "0.875rem", color: "#666" }}>Type:</span>
+            <button
+              style={{ ...filterBtnStyle, ...(typeFilter === "all" ? filterBtnActive : {}) }}
+              onClick={() => { setTypeFilter("all"); setSelectedIndex(null); fetchMedia(1); }}
+            >
+              All
+            </button>
+            <button
+              style={{ ...filterBtnStyle, ...(typeFilter === "image" ? filterBtnActive : {}) }}
+              onClick={() => { setTypeFilter("image"); setSelectedIndex(null); fetchMedia(1); }}
+            >
+              Images
+            </button>
+            <button
+              style={{ ...filterBtnStyle, ...(typeFilter === "video" ? filterBtnActive : {}) }}
+              onClick={() => { setTypeFilter("video"); setSelectedIndex(null); fetchMedia(1); }}
+            >
+              Videos
+            </button>
+          </div>
+
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <span style={{ fontSize: "0.875rem", color: "#666" }}>From:</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => { setDateFrom(e.target.value); setSelectedIndex(null); fetchMedia(1); }}
+              style={filterInputStyle}
+            />
+            <span style={{ fontSize: "0.875rem", color: "#666" }}>To:</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => { setDateTo(e.target.value); setSelectedIndex(null); fetchMedia(1); }}
+              style={filterInputStyle}
+            />
+            {(dateFrom || dateTo) && (
+              <button
+                style={filterBtnStyle}
+                onClick={() => { setDateFrom(""); setDateTo(""); setSelectedIndex(null); fetchMedia(1); }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </div>
 
         {totalPages > 1 && (
@@ -225,6 +285,29 @@ const paginationStyles: Record<string, Record<string, string>> = {
     fontSize: "0.875rem",
     color: "#666",
   },
+};
+
+const filterBtnStyle: Record<string, string> = {
+  padding: "0.25rem 0.75rem",
+  fontSize: "0.875rem",
+  fontWeight: "500",
+  color: "#666",
+  backgroundColor: "transparent",
+  border: "1px solid #ddd",
+  borderRadius: "4px",
+  cursor: "pointer",
+};
+
+const filterBtnActive: Record<string, string> = {
+  color: "#0070f3",
+  borderColor: "#0070f3",
+};
+
+const filterInputStyle: Record<string, string> = {
+  padding: "0.25rem 0.5rem",
+  fontSize: "0.875rem",
+  border: "1px solid #ddd",
+  borderRadius: "4px",
 };
 
 export default App;

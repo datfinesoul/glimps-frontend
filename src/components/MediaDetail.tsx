@@ -80,7 +80,20 @@ export function MediaDetail({ item, onClose, onNavigate, hasPrev, hasNext }: Med
       </div>
 
       <div style={styles.metadata}>
-        <h3 style={styles.filename}>{item.fileName}</h3>
+        <div style={styles.filenameRow}>
+          <h3 style={styles.filename}>{item.fileName}</h3>
+          {item.originalPath && (
+            <a
+              href={item.originalPath}
+              download={item.fileName}
+              style={styles.downloadBtn}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              ↓ Download Original
+            </a>
+          )}
+        </div>
         <div style={styles.metaGrid}>
           <div style={styles.metaItem}>
             <span style={styles.metaLabel}>Type</span>
@@ -183,10 +196,25 @@ const styles: Record<string, Record<string, string | number>> = {
     zIndex: 1,
   },
   filename: {
-    margin: "0 0 1rem 0",
+    margin: "0",
     fontSize: "1rem",
     fontWeight: "500",
     color: "#fff",
+  },
+  filenameRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "1rem",
+  },
+  downloadBtn: {
+    fontSize: "0.875rem",
+    fontWeight: "500",
+    color: "#0070f3",
+    textDecoration: "none",
+    padding: "0.25rem 0.5rem",
+    border: "1px solid #0070f3",
+    borderRadius: "4px",
   },
   metaGrid: {
     display: "grid",
