@@ -6,6 +6,7 @@ interface MediaItem {
   fileName: string;
   favorited: boolean;
   sensitive: boolean;
+  createdAt: string;
 }
 
 interface MediaCardProps {
@@ -15,6 +16,11 @@ interface MediaCardProps {
 
 export function MediaCard({ item, onClick }: MediaCardProps) {
   const imageUrl = item.thumbnailPath || item.previewPath || "/placeholder.svg";
+
+  const formatDate = (dateStr: string): string => {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
 
   return (
     <div style={styles.card} onClick={onClick}>
@@ -26,6 +32,9 @@ export function MediaCard({ item, onClick }: MediaCardProps) {
         {item.favorited && (
           <div style={styles.favoriteIndicator}>★</div>
         )}
+        <div style={styles.dateOverlay}>
+          <span style={styles.dateText}>{formatDate(item.createdAt)}</span>
+        </div>
       </div>
       <div style={styles.overlay}>
         <p style={styles.filename} title={item.fileName}>{item.fileName}</p>
@@ -71,6 +80,18 @@ const styles: Record<string, Record<string, string | number>> = {
     fontSize: "1.25rem",
     color: "#f59e0b",
     textShadow: "0 1px 2px rgba(0,0,0,0.5)",
+  },
+  dateOverlay: {
+    position: "absolute",
+    top: "8px",
+    left: "8px",
+    backgroundColor: "rgba(0,0,0,0.6)",
+    borderRadius: "4px",
+    padding: "0.125rem 0.375rem",
+  },
+  dateText: {
+    fontSize: "0.7rem",
+    color: "#fff",
   },
   overlay: {
     position: "absolute",

@@ -8,12 +8,13 @@ interface MediaItem {
   fileName: string;
   favorited: boolean;
   sensitive: boolean;
+  createdAt: string;
 }
 
 interface MediaGridProps {
   items: MediaItem[];
   loading: boolean;
-  onSelect: (item: MediaItem) => void;
+  onSelect: (item: MediaItem) => void | Promise<void>;
 }
 
 export function MediaGrid({ items, loading, onSelect }: MediaGridProps) {

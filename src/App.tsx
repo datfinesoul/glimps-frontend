@@ -11,6 +11,7 @@ interface MediaItem {
   fileName: string;
   favorited: boolean;
   sensitive: boolean;
+  createdAt: string;
 }
 
 interface MediaListResponse {
