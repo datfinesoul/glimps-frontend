@@ -46,7 +46,7 @@ interface MediaDetailResponse {
 }
 
 interface ConfirmState {
-  type: "soft" | "hard" | "empty";
+  type: "hard" | "empty";
   item?: MediaItem;
   count?: number;
 }
@@ -76,7 +76,6 @@ function App() {
   const [trashTotalItems, setTrashTotalItems] = useState(0);
 
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<MediaItem | null>(null);
 
   const buildQuery = useCallback((page: number) => {
     const params = new URLSearchParams({ page: String(page), limit: "30" });
@@ -166,7 +165,6 @@ function App() {
       if (e.key === "Escape") {
         if (confirmState) {
           setConfirmState(null);
-          setPendingDelete(null);
         } else if (deleteMode) {
           setDeleteMode(false);
         }
@@ -178,8 +176,15 @@ function App() {
 
   const handleSelect = useCallback(async (item: MediaItem) => {
     if (deleteMode) {
-      setPendingDelete(item);
-      setConfirmState({ type: "soft", item });
+      try {
+        const response = await fetch(`/api/media/${item.id}`, { method: "DELETE" });
+        if (response.ok) {
+          setMediaItems((prev) => prev.filter((m) => m.id !== item.id));
+          setTotalItems((prev) => Math.max(0, prev - 1));
+        }
+      } catch (err) {
+        console.error("Failed to delete:", err);
+      }
       return;
     }
 
@@ -197,22 +202,6 @@ function App() {
     }
   }, [mediaItems, deleteMode]);
 
-  const handleSoftDelete = async () => {
-    if (!pendingDelete) return;
-    try {
-      const response = await fetch(`/api/media/${pendingDelete.id}`, { method: "DELETE" });
-      if (response.ok) {
-        setMediaItems((prev) => prev.filter((m) => m.id !== pendingDelete.id));
-        setTotalItems((prev) => Math.max(0, prev - 1));
-      }
-    } catch (err) {
-      console.error("Failed to delete:", err);
-    } finally {
-      setConfirmState(null);
-      setPendingDelete(null);
-    }
-  };
-
   const handleRestore = async (item: MediaItem) => {
     try {
       const response = await fetch(`/api/media/${item.id}/restore`, { method: "POST" });
@@ -226,18 +215,17 @@ function App() {
   };
 
   const handleHardDelete = async () => {
-    if (!pendingDelete) return;
+    if (!confirmState?.item) return;
     try {
-      const response = await fetch(`/api/media/${pendingDelete.id}/permanent`, { method: "DELETE" });
+      const response = await fetch(`/api/media/${confirmState.item.id}/permanent`, { method: "DELETE" });
       if (response.ok) {
-        setTrashItems((prev) => prev.filter((m) => m.id !== pendingDelete.id));
+        setTrashItems((prev) => prev.filter((m) => m.id !== confirmState.item!.id));
         setTrashTotalItems((prev) => Math.max(0, prev - 1));
       }
     } catch (err) {
       console.error("Failed to permanently delete:", err);
     } finally {
       setConfirmState(null);
-      setPendingDelete(null);
     }
   };
 
@@ -252,7 +240,6 @@ function App() {
       console.error("Failed to empty trash:", err);
     } finally {
       setConfirmState(null);
-      setPendingDelete(null);
     }
   };
 
@@ -564,7 +551,6 @@ function App() {
               trashItems={trashItems}
               onRestore={handleRestore}
               onHardDelete={(item) => {
-                setPendingDelete(item);
                 setConfirmState({ type: "hard", item });
               }}
             />
@@ -611,17 +597,6 @@ function App() {
 
       {confirmState && (
         <>
-          {confirmState.type === "soft" && confirmState.item && (
-            <ConfirmDialog
-              title="Move to trash?"
-              message={confirmState.item.fileName}
-              confirmLabel="Delete"
-              cancelLabel="Cancel"
-              destructive
-              onConfirm={handleSoftDelete}
-              onCancel={() => { setConfirmState(null); setPendingDelete(null); }}
-            />
-          )}
           {confirmState.type === "hard" && confirmState.item && (
             <ConfirmDialog
               title="Delete permanently?"
@@ -631,7 +606,7 @@ function App() {
               cancelLabel="Cancel"
               destructive
               onConfirm={handleHardDelete}
-              onCancel={() => { setConfirmState(null); setPendingDelete(null); }}
+              onCancel={() => { setConfirmState(null); }}
             />
           )}
           {confirmState.type === "empty" && (
@@ -643,7 +618,7 @@ function App() {
               cancelLabel="Cancel"
               destructive
               onConfirm={handleEmptyTrash}
-              onCancel={() => { setConfirmState(null); setPendingDelete(null); }}
+              onCancel={() => { setConfirmState(null); }}
             />
           )}
         </>
