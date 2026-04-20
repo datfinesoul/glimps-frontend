@@ -16,16 +16,22 @@ interface UploadResponse {
   errors?: Array<{ fileName: string; error: string }>;
 }
 
+interface UploadZoneProps {
+  onUploadComplete?: () => void;
+}
+
 const MAX_CONCURRENT = 10;
 
 function isMediaFile(file: File): boolean {
   return file.type.startsWith("image/") || file.type.startsWith("video/");
 }
 
-export function UploadZone() {
+export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   const [files, setFiles] = useState<PerFileState[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const retryTimers = useRef<Map<File, ReturnType<typeof setTimeout>>>(new Map());
+  const onUploadCompleteRef = useRef(onUploadComplete);
+  onUploadCompleteRef.current = onUploadComplete;
 
   const activeCount = files.filter((f) => f.status === "uploading").length;
   const completedCount = files.filter((f) => f.status === "success").length;
@@ -165,6 +171,9 @@ export function UploadZone() {
 
       const queueNext = () => {
         running--;
+        if (running === 0 && idx === newFileStates.length && onUploadCompleteRef.current) {
+          onUploadCompleteRef.current();
+        }
         processNext();
       };
 

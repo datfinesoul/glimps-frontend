@@ -584,7 +584,7 @@ function App() {
         <h2 style={{ fontSize: "1.125rem", fontWeight: 600, padding: "0 2rem", marginTop: "2rem" }}>
           Upload Media
         </h2>
-        <UploadZone />
+        <UploadZone onUploadComplete={() => fetchMedia(1)} />
       </section>
 
       <MediaDetail
