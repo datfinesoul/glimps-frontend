@@ -9,15 +9,19 @@ interface MediaItem {
   favorited: boolean;
   sensitive: boolean;
   createdAt: string;
+  deletedAt?: string | null;
 }
 
 interface MediaGridProps {
   items: MediaItem[];
   loading: boolean;
   onSelect: (item: MediaItem) => void | Promise<void>;
+  trashItems?: MediaItem[];
+  onRestore?: (item: MediaItem) => void;
+  onHardDelete?: (item: MediaItem) => void;
 }
 
-export function MediaGrid({ items, loading, onSelect }: MediaGridProps) {
+export function MediaGrid({ items, loading, onSelect, trashItems, onRestore, onHardDelete }: MediaGridProps) {
   if (loading) {
     return (
       <div style={styles.container}>
@@ -39,18 +43,27 @@ export function MediaGrid({ items, loading, onSelect }: MediaGridProps) {
     );
   }
 
+  const isTrash = !!trashItems;
+
   return (
     <div style={styles.container}>
       <div style={styles.grid}>
         {items.map((item) => (
-          <MediaCard key={item.id} item={item} onClick={() => onSelect(item)} />
+          <MediaCard
+            key={item.id}
+            item={item}
+            onClick={() => onSelect(item)}
+            isTrash={isTrash}
+            onRestore={isTrash ? () => onRestore?.(item) : undefined}
+            onHardDelete={isTrash ? () => onHardDelete?.(item) : undefined}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-const styles: Record<string, Record<string, string>> = {
+const styles: Record<string, Record<string, string | number>> = {
   container: {
     padding: "0 2rem 2rem 2rem",
   },

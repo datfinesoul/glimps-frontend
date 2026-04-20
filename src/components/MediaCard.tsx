@@ -7,17 +7,26 @@ interface MediaItem {
   favorited: boolean;
   sensitive: boolean;
   createdAt: string;
+  deletedAt?: string | null;
 }
 
 interface MediaCardProps {
   item: MediaItem;
   onClick: () => void;
+  isTrash?: boolean;
+  onRestore?: () => void;
+  onHardDelete?: () => void;
 }
 
-export function MediaCard({ item, onClick }: MediaCardProps) {
+export function MediaCard({ item, onClick, isTrash, onRestore, onHardDelete }: MediaCardProps) {
   const imageUrl = item.thumbnailPath || item.previewPath || "/placeholder.svg";
 
   const formatDate = (dateStr: string): string => {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  const formatDeletedDate = (dateStr: string): string => {
     const d = new Date(dateStr);
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   };
@@ -32,12 +41,35 @@ export function MediaCard({ item, onClick }: MediaCardProps) {
         {item.favorited && (
           <div style={styles.favoriteIndicator}>★</div>
         )}
-        <div style={styles.dateOverlay}>
-          <span style={styles.dateText}>{formatDate(item.createdAt)}</span>
-        </div>
+        {isTrash && item.deletedAt && (
+          <div style={styles.deletedOverlay}>
+            <span style={styles.deletedText}>Deleted {formatDeletedDate(item.deletedAt)}</span>
+          </div>
+        )}
+        {!isTrash && (
+          <div style={styles.dateOverlay}>
+            <span style={styles.dateText}>{formatDate(item.createdAt)}</span>
+          </div>
+        )}
       </div>
       <div style={styles.overlay}>
         <p style={styles.filename} title={item.fileName}>{item.fileName}</p>
+        {isTrash && (
+          <div style={styles.trashActions}>
+            <button
+              style={styles.restoreBtn}
+              onClick={(e) => { e.stopPropagation(); onRestore?.(); }}
+            >
+              Restore
+            </button>
+            <button
+              style={styles.hardDeleteBtn}
+              onClick={(e) => { e.stopPropagation(); onHardDelete?.(); }}
+            >
+              Delete
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -93,6 +125,18 @@ const styles: Record<string, Record<string, string | number>> = {
     fontSize: "0.7rem",
     color: "#fff",
   },
+  deletedOverlay: {
+    position: "absolute",
+    top: "8px",
+    left: "8px",
+    backgroundColor: "rgba(220,38,38,0.9)",
+    borderRadius: "4px",
+    padding: "0.125rem 0.375rem",
+  },
+  deletedText: {
+    fontSize: "0.7rem",
+    color: "#fff",
+  },
   overlay: {
     position: "absolute",
     bottom: 0,
@@ -110,5 +154,32 @@ const styles: Record<string, Record<string, string | number>> = {
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
+  },
+  trashActions: {
+    display: "flex",
+    gap: "0.375rem",
+    marginTop: "0.25rem",
+  },
+  restoreBtn: {
+    flex: 1,
+    padding: "0.25rem 0.5rem",
+    fontSize: "0.7rem",
+    fontWeight: 500,
+    color: "#fff",
+    backgroundColor: "rgba(0,113,227,0.9)",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+  },
+  hardDeleteBtn: {
+    flex: 1,
+    padding: "0.25rem 0.5rem",
+    fontSize: "0.7rem",
+    fontWeight: 500,
+    color: "#fff",
+    backgroundColor: "rgba(220,38,38,0.9)",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
   },
 };
