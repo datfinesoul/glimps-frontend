@@ -21,9 +21,46 @@ interface UploadZoneProps {
 }
 
 const MAX_CONCURRENT = 10;
+const PROGRESS_THROTTLE_MS = 200;
+const SUMMARY_THRESHOLD = 20;
 
 function isMediaFile(file: File): boolean {
   return file.type.startsWith("image/") || file.type.startsWith("video/");
+}
+
+function useThrottledProgress() {
+  const pendingRef = useRef<Map<File, number>>(new Map());
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setFilesRef = useRef<((fn: (prev: PerFileState[]) => PerFileState[]) => void) | null>(null);
+
+  setFilesRef.current = null;
+
+  const flush = useCallback(() => {
+    timerRef.current = null;
+    const pending = pendingRef.current;
+    if (pending.size === 0 || !setFilesRef.current) return;
+    const snapshot = new Map(pending);
+    pending.clear();
+    setFilesRef.current((prev) =>
+      prev.map((f) => {
+        const p = snapshot.get(f.file);
+        return p !== undefined ? { ...f, progress: p } : f;
+      })
+    );
+  }, []);
+
+  const track = useCallback(
+    (file: File, progress: number, setFiles: (fn: (prev: PerFileState[]) => PerFileState[]) => void) => {
+      pendingRef.current.set(file, progress);
+      setFilesRef.current = setFiles;
+      if (!timerRef.current) {
+        timerRef.current = setTimeout(flush, PROGRESS_THROTTLE_MS);
+      }
+    },
+    [flush]
+  );
+
+  return track;
 }
 
 export function UploadZone({ onUploadComplete }: UploadZoneProps) {
@@ -32,12 +69,16 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   const retryTimers = useRef<Map<File, ReturnType<typeof setTimeout>>>(new Map());
   const onUploadCompleteRef = useRef(onUploadComplete);
   onUploadCompleteRef.current = onUploadComplete;
+  const throttledProgress = useThrottledProgress();
 
   const activeCount = files.filter((f) => f.status === "uploading").length;
   const completedCount = files.filter((f) => f.status === "success").length;
   const duplicateCount = files.filter((f) => f.status === "duplicate").length;
   const rateLimitedCount = files.filter((f) => f.status === "rateLimited").length;
   const errorCount = files.filter((f) => f.status === "error").length;
+  const pendingCount = files.filter((f) => f.status === "pending").length;
+  const settledCount = completedCount + duplicateCount + errorCount;
+  const overallPercent = files.length > 0 ? Math.round((settledCount / files.length) * 100) : 0;
 
   const uploadFile = useCallback(
     async (
@@ -61,9 +102,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
         xhr.upload.addEventListener("progress", (e) => {
           if (e.lengthComputable) {
             const progress = Math.round((e.loaded / e.total) * 100);
-            setFiles((prev) =>
-              prev.map((f) => (f.file === file ? { ...f, progress } : f))
-            );
+            throttledProgress(file, progress, setFiles);
           }
         });
 
@@ -150,7 +189,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
 
       queueNext();
     },
-    []
+    [throttledProgress]
   );
 
   const handleFiles = useCallback(
@@ -180,15 +219,14 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
       const processNext = () => {
         while (running < MAX_CONCURRENT && idx < newFileStates.length) {
           const fileState = newFileStates[idx++];
-          const current = files.find((f) => f.file === fileState.file) || fileState;
           running++;
-          uploadFile(current, queueNext);
+          uploadFile(fileState, queueNext);
         }
       };
 
       processNext();
     },
-    [uploadFile, files]
+    [uploadFile]
   );
 
   const handleDrop = useCallback(
@@ -237,12 +275,16 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
     []
   );
 
+  const isUploading = activeCount > 0 || pendingCount > 0 || rateLimitedCount > 0;
+  const showSummary = files.length > SUMMARY_THRESHOLD;
+
   return (
     <div style={styles.container}>
       <div
         style={{
           ...styles.zone,
           ...(isDragging ? styles.zoneDragging : {}),
+          ...(files.length > 0 ? styles.zoneActive : {}),
         }}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
@@ -268,44 +310,104 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
 
         {files.length > 0 && (
           <div style={styles.fileList}>
-            {files.map((fileState) => (
-              <div key={fileState.file.name} style={styles.fileRow}>
-                <div style={styles.fileInfo}>
-                  <span style={styles.fileName}>{fileState.file.name}</span>
-                  {fileState.status === "uploading" && (
-                    <div style={styles.inlineProgress}>
-                      <div
-                        style={{
-                          ...styles.inlineProgressFill,
-                          width: `${fileState.progress}%`,
-                        }}
-                      />
-                    </div>
-                  )}
-                  {fileState.status === "success" && (
-                    <span style={styles.successText}>✓ uploaded</span>
-                  )}
-                  {fileState.status === "duplicate" && (
-                    <span style={styles.warningText}>⚠ already uploaded</span>
-                  )}
-                  {fileState.status === "rateLimited" && (
-                    <span style={styles.warningText}>
-                      ⚠ rate limited, retrying in {fileState.retryAfter}s
-                    </span>
-                  )}
-                  {fileState.status === "error" && (
-                    <span style={styles.errorText}>✗ {fileState.error}</span>
-                  )}
+            {isUploading && (
+              <div style={styles.overallProgress}>
+                <div style={styles.overallProgressHeader}>
+                  <span style={styles.overallLabel}>
+                    {settledCount} / {files.length} files
+                  </span>
+                  <span style={styles.overallPercent}>{overallPercent}%</span>
                 </div>
-                <button
-                  onClick={() => removeFile(fileState.file)}
-                  style={styles.removeBtn}
-                  aria-label={`Remove ${fileState.file.name}`}
-                >
-                  ✗
-                </button>
+                <div style={styles.overallProgressBar}>
+                  <div
+                    style={{
+                      ...styles.overallProgressFill,
+                      width: `${overallPercent}%`,
+                    }}
+                  />
+                </div>
               </div>
-            ))}
+            )}
+
+            {showSummary ? (
+              <div style={styles.summaryGrid}>
+                {activeCount > 0 && (
+                  <div style={styles.summaryItem}>
+                    <span style={styles.summaryNumber}>{activeCount}</span>
+                    <span style={styles.uploadingText}>uploading</span>
+                  </div>
+                )}
+                {pendingCount > 0 && (
+                  <div style={styles.summaryItem}>
+                    <span style={styles.summaryNumber}>{pendingCount}</span>
+                    <span style={styles.uploadingText}>pending</span>
+                  </div>
+                )}
+                {completedCount > 0 && (
+                  <div style={styles.summaryItem}>
+                    <span style={styles.summaryNumber}>{completedCount}</span>
+                    <span style={styles.successText}>uploaded</span>
+                  </div>
+                )}
+                {duplicateCount > 0 && (
+                  <div style={styles.summaryItem}>
+                    <span style={styles.summaryNumber}>{duplicateCount}</span>
+                    <span style={styles.warningText}>skipped</span>
+                  </div>
+                )}
+                {rateLimitedCount > 0 && (
+                  <div style={styles.summaryItem}>
+                    <span style={styles.summaryNumber}>{rateLimitedCount}</span>
+                    <span style={styles.warningText}>waiting</span>
+                  </div>
+                )}
+                {errorCount > 0 && (
+                  <div style={styles.summaryItem}>
+                    <span style={styles.summaryNumber}>{errorCount}</span>
+                    <span style={styles.errorText}>failed</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              files.map((fileState) => (
+                <div key={`${fileState.file.name}-${fileState.progress}`} style={styles.fileRow}>
+                  <div style={styles.fileInfo}>
+                    <span style={styles.fileName}>{fileState.file.name}</span>
+                    {fileState.status === "uploading" && (
+                      <div style={styles.inlineProgress}>
+                        <div
+                          style={{
+                            ...styles.inlineProgressFill,
+                            width: `${fileState.progress}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                    {fileState.status === "success" && (
+                      <span style={styles.successText}>✓ uploaded</span>
+                    )}
+                    {fileState.status === "duplicate" && (
+                      <span style={styles.warningText}>⚠ already uploaded</span>
+                    )}
+                    {fileState.status === "rateLimited" && (
+                      <span style={styles.warningText}>
+                        ⚠ rate limited, retrying in {fileState.retryAfter}s
+                      </span>
+                    )}
+                    {fileState.status === "error" && (
+                      <span style={styles.errorText}>✗ {fileState.error}</span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => removeFile(fileState.file)}
+                    style={styles.removeBtn}
+                    aria-label={`Remove ${fileState.file.name}`}
+                  >
+                    ✗
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>
@@ -338,7 +440,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   );
 }
 
-const styles: Record<string, Record<string, string>> = {
+const styles: Record<string, Record<string, string | number>> = {
   container: {
     display: "flex",
     flexDirection: "column",
@@ -363,6 +465,9 @@ const styles: Record<string, Record<string, string>> = {
   zoneDragging: {
     borderColor: "#0070f3",
     backgroundColor: "#f0f7ff",
+  },
+  zoneActive: {
+    cursor: "default",
   },
   icon: {
     fontSize: "2rem",
@@ -398,6 +503,58 @@ const styles: Record<string, Record<string, string>> = {
     display: "flex",
     flexDirection: "column",
     gap: "0.5rem",
+  },
+  overallProgress: {
+    width: "100%",
+    marginBottom: "0.75rem",
+  },
+  overallProgressHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+    marginBottom: "0.375rem",
+  },
+  overallLabel: {
+    fontSize: "0.875rem",
+    fontWeight: "500",
+    color: "#1a1a1a",
+  },
+  overallPercent: {
+    fontSize: "0.875rem",
+    fontWeight: "600",
+    color: "#0070f3",
+  },
+  overallProgressBar: {
+    width: "100%",
+    height: "8px",
+    backgroundColor: "#e0e0e0",
+    borderRadius: "4px",
+    overflow: "hidden",
+  },
+  overallProgressFill: {
+    height: "100%",
+    backgroundColor: "#0070f3",
+    borderRadius: "4px",
+    transition: "width 0.3s ease",
+  },
+  summaryGrid: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "1rem",
+    width: "100%",
+    justifyContent: "center",
+    padding: "0.5rem 0",
+  },
+  summaryItem: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "0.125rem",
+  },
+  summaryNumber: {
+    fontSize: "1.5rem",
+    fontWeight: "600",
+    color: "#1a1a1a",
   },
   fileRow: {
     display: "flex",
