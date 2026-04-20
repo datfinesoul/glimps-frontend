@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, DragEvent, ChangeEvent } from "react";
+import { useState, useCallback, useRef, useMemo, DragEvent, ChangeEvent } from "react";
 
 type FileStatus = "pending" | "uploading" | "success" | "duplicate" | "rateLimited" | "error";
 
@@ -71,14 +71,29 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   onUploadCompleteRef.current = onUploadComplete;
   const throttledProgress = useThrottledProgress();
 
-  const activeCount = files.filter((f) => f.status === "uploading").length;
-  const completedCount = files.filter((f) => f.status === "success").length;
-  const duplicateCount = files.filter((f) => f.status === "duplicate").length;
-  const rateLimitedCount = files.filter((f) => f.status === "rateLimited").length;
-  const errorCount = files.filter((f) => f.status === "error").length;
-  const pendingCount = files.filter((f) => f.status === "pending").length;
-  const settledCount = completedCount + duplicateCount + errorCount;
-  const overallPercent = files.length > 0 ? Math.round((settledCount / files.length) * 100) : 0;
+  const { activeCount, completedCount, duplicateCount, rateLimitedCount, errorCount, pendingCount, settledCount, overallPercent } = useMemo(() => {
+    const counts = {
+      activeCount: 0,
+      completedCount: 0,
+      duplicateCount: 0,
+      rateLimitedCount: 0,
+      errorCount: 0,
+      pendingCount: 0,
+      settledCount: 0,
+      overallPercent: 0,
+    };
+    for (const f of files) {
+      if (f.status === "uploading") counts.activeCount++;
+      else if (f.status === "success") counts.completedCount++;
+      else if (f.status === "duplicate") counts.duplicateCount++;
+      else if (f.status === "rateLimited") counts.rateLimitedCount++;
+      else if (f.status === "error") counts.errorCount++;
+      else if (f.status === "pending") counts.pendingCount++;
+    }
+    counts.settledCount = counts.completedCount + counts.duplicateCount + counts.errorCount;
+    counts.overallPercent = files.length > 0 ? Math.round((counts.settledCount / files.length) * 100) : 0;
+    return counts;
+  }, [files]);
 
   const uploadFile = useCallback(
     async (
@@ -112,8 +127,12 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
               const retryAfter = parseInt(xhr.getResponseHeader("Retry-After") || "30", 10);
               reject({ status: 429, retryAfter: isNaN(retryAfter) ? 30 : retryAfter });
             } else if (xhr.status >= 200 && xhr.status < 300) {
-              const data = JSON.parse(xhr.responseText);
-              resolve(data as UploadResponse);
+              try {
+                const data = JSON.parse(xhr.responseText);
+                resolve(data as UploadResponse);
+              } catch {
+                reject(new Error("invalid response from server"));
+              }
             } else {
               try {
                 const err = JSON.parse(xhr.responseText) as { error?: string };
@@ -370,7 +389,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
               </div>
             ) : (
               files.map((fileState) => (
-                <div key={`${fileState.file.name}-${fileState.progress}`} style={styles.fileRow}>
+                <div key={`${fileState.file.name}-${fileState.file.size}`} style={styles.fileRow}>
                   <div style={styles.fileInfo}>
                     <span style={styles.fileName}>{fileState.file.name}</span>
                     {fileState.status === "uploading" && (

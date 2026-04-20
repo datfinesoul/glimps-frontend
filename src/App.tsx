@@ -53,6 +53,76 @@ interface ConfirmState {
 
 type ViewMode = "browse" | "search" | "trash";
 
+const SESSION_KEY_BROWSE = "glimps_browse_cache";
+const SESSION_KEY_TRASH = "glimps_trash_cache";
+
+interface BrowseCache {
+  data: MediaItem[];
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  typeFilter: "all" | "image" | "video";
+  dateFrom: string;
+  dateTo: string;
+}
+
+interface TrashCache {
+  data: MediaItem[];
+  page: number;
+  totalPages: number;
+  totalItems: number;
+}
+
+function getBrowseCache(): BrowseCache | null {
+  try {
+    const cached = sessionStorage.getItem(SESSION_KEY_BROWSE);
+    return cached ? JSON.parse(cached) : null;
+  } catch {
+    return null;
+  }
+}
+
+function setBrowseCache(cache: BrowseCache): void {
+  try {
+    sessionStorage.setItem(SESSION_KEY_BROWSE, JSON.stringify(cache));
+  } catch {
+    // sessionStorage full or unavailable
+  }
+}
+
+function clearBrowseCache(): void {
+  try {
+    sessionStorage.removeItem(SESSION_KEY_BROWSE);
+  } catch {
+    // ignore
+  }
+}
+
+function getTrashCache(): TrashCache | null {
+  try {
+    const cached = sessionStorage.getItem(SESSION_KEY_TRASH);
+    return cached ? JSON.parse(cached) : null;
+  } catch {
+    return null;
+  }
+}
+
+function setTrashCache(cache: TrashCache): void {
+  try {
+    sessionStorage.setItem(SESSION_KEY_TRASH, JSON.stringify(cache));
+  } catch {
+    // sessionStorage full or unavailable
+  }
+}
+
+function clearTrashCache(): void {
+  try {
+    sessionStorage.removeItem(SESSION_KEY_TRASH);
+  } catch {
+    // ignore
+  }
+}
+
 function App() {
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,13 +173,22 @@ function App() {
         setCurrentPage(data.pagination.page);
         setTotalPages(data.pagination.totalPages);
         setTotalItems(data.pagination.total);
+        setBrowseCache({
+          data: data.data,
+          page: data.pagination.page,
+          totalPages: data.pagination.totalPages,
+          totalItems: data.pagination.total,
+          typeFilter,
+          dateFrom,
+          dateTo,
+        });
       }
     } catch (err) {
       console.error("Failed to fetch media:", err);
     } finally {
       setLoading(false);
     }
-  }, [buildQuery]);
+  }, [buildQuery, typeFilter, dateFrom, dateTo]);
 
   const fetchSearch = useCallback(async (page: number) => {
     setLoading(true);
@@ -140,6 +219,12 @@ function App() {
         setTrashPage(data.pagination.page);
         setTrashTotalPages(data.pagination.totalPages);
         setTrashTotalItems(data.pagination.total);
+        setTrashCache({
+          data: data.data,
+          page: data.pagination.page,
+          totalPages: data.pagination.totalPages,
+          totalItems: data.pagination.total,
+        });
       }
     } catch (err) {
       console.error("Failed to fetch trash:", err);
@@ -151,14 +236,36 @@ function App() {
   const trashCount = trashTotalItems;
 
   useEffect(() => {
+    console.log("[Cache Debug] useEffect running", { viewMode, typeFilter, dateFrom, dateTo });
     if (viewMode === "browse") {
-      fetchMedia(1);
+      const cached = getBrowseCache();
+      console.log("[Cache Debug] browse cache:", cached ? "found" : "null", { cachedTypeFilter: cached?.typeFilter, stateTypeFilter: typeFilter, match: cached?.typeFilter === typeFilter });
+      if (cached && cached.typeFilter === typeFilter && cached.dateFrom === dateFrom && cached.dateTo === dateTo) {
+        console.log("[Cache Debug] Using cached data, items:", cached.data.length);
+        setMediaItems(cached.data);
+        setCurrentPage(cached.page);
+        setTotalPages(cached.totalPages);
+        setTotalItems(cached.totalItems);
+        setLoading(false);
+      } else {
+        console.log("[Cache Debug] Cache miss or filters changed, fetching");
+        fetchMedia(1);
+      }
     } else if (viewMode === "search") {
       fetchSearch(1);
     } else if (viewMode === "trash") {
-      fetchTrash(1);
+      const cached = getTrashCache();
+      if (cached) {
+        setTrashItems(cached.data);
+        setTrashPage(cached.page);
+        setTrashTotalPages(cached.totalPages);
+        setTrashTotalItems(cached.totalItems);
+        setTrashLoading(false);
+      } else {
+        fetchTrash(1);
+      }
     }
-  }, [viewMode, fetchMedia, fetchSearch, fetchTrash]);
+  }, [viewMode, fetchMedia, fetchSearch, fetchTrash, typeFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -181,6 +288,7 @@ function App() {
         if (response.ok) {
           setMediaItems((prev) => prev.filter((m) => m.id !== item.id));
           setTotalItems((prev) => Math.max(0, prev - 1));
+          clearBrowseCache();
         }
       } catch (err) {
         console.error("Failed to delete:", err);
@@ -208,6 +316,7 @@ function App() {
       if (response.ok) {
         setTrashItems((prev) => prev.filter((m) => m.id !== item.id));
         setTrashTotalItems((prev) => Math.max(0, prev - 1));
+        clearTrashCache();
       }
     } catch (err) {
       console.error("Failed to restore:", err);
@@ -221,6 +330,7 @@ function App() {
       if (response.ok) {
         setTrashItems((prev) => prev.filter((m) => m.id !== confirmState.item!.id));
         setTrashTotalItems((prev) => Math.max(0, prev - 1));
+        clearTrashCache();
       }
     } catch (err) {
       console.error("Failed to permanently delete:", err);
@@ -235,6 +345,7 @@ function App() {
       if (response.ok) {
         setTrashItems([]);
         setTrashTotalItems(0);
+        clearTrashCache();
       }
     } catch (err) {
       console.error("Failed to empty trash:", err);
@@ -584,7 +695,7 @@ function App() {
         <h2 style={{ fontSize: "1.125rem", fontWeight: 600, padding: "0 2rem", marginTop: "2rem" }}>
           Upload Media
         </h2>
-        <UploadZone onUploadComplete={() => fetchMedia(1)} />
+        <UploadZone onUploadComplete={() => { clearBrowseCache(); fetchMedia(1); }} />
       </section>
 
       <MediaDetail
