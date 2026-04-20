@@ -1,7 +1,10 @@
+import { useState, useRef } from "react";
+
 interface MediaItem {
   id: string;
   thumbnailPath: string | null;
   previewPath: string | null;
+  animatedThumbnailPath: string | null;
   type: string;
   fileName: string;
   favorited: boolean;
@@ -21,6 +24,26 @@ interface MediaCardProps {
 export function MediaCard({ item, onClick, isTrash, onRestore, onHardDelete }: MediaCardProps) {
   const imageUrl = item.thumbnailPath || item.previewPath || "/placeholder.svg";
 
+  const [showVideo, setShowVideo] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const isVideo = item.type === "video";
+  const hasAnimatedThumbnail = !!item.animatedThumbnailPath;
+
+  const handleMouseEnter = () => {
+    if (isVideo && hasAnimatedThumbnail && videoRef.current) {
+      setShowVideo(true);
+      videoRef.current.play().catch(() => {});
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (showVideo && videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+      setShowVideo(false);
+    }
+  };
+
   const formatDate = (dateStr: string): string => {
     const d = new Date(dateStr);
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -33,8 +56,22 @@ export function MediaCard({ item, onClick, isTrash, onRestore, onHardDelete }: M
 
   return (
     <div style={styles.card} onClick={onClick}>
-      <div style={styles.imageWrapper}>
-        <img src={imageUrl} alt={item.fileName} style={styles.image} loading="lazy" />
+      <div
+        style={styles.imageWrapper}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {isVideo && hasAnimatedThumbnail && showVideo ? (
+          <video
+            ref={videoRef}
+            src={item.animatedThumbnailPath!}
+            style={styles.image}
+            muted
+            loop
+          />
+        ) : (
+          <img src={imageUrl} alt={item.fileName} style={styles.image} loading="lazy" />
+        )}
         {item.type === "video" && (
           <div style={styles.videoIndicator}>▶</div>
         )}

@@ -8,6 +8,7 @@ interface MediaItem {
   id: string;
   thumbnailPath: string | null;
   previewPath: string | null;
+  animatedThumbnailPath: string | null;
   type: string;
   fileName: string;
   favorited: boolean;

@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 interface MediaDetailItem {
   id: string;
   originalPath: string | null;
@@ -26,9 +28,15 @@ interface MediaDetailProps {
 }
 
 export function MediaDetail({ item, onClose, onNavigate, hasPrev, hasNext }: MediaDetailProps) {
+  const [videoQuality, setVideoQuality] = useState<"preview" | "original">("preview");
+
   if (!item) return null;
 
+  const isVideo = item.type === "video";
   const imageUrl = item.previewPath || item.thumbnailPath || item.originalPath || "/placeholder.svg";
+
+  const streamUrl = `/api/media/${item.id}/stream`;
+  const videoSrc = videoQuality === "preview" && item.previewPath ? streamUrl : item.originalPath;
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -67,7 +75,28 @@ export function MediaDetail({ item, onClose, onNavigate, hasPrev, hasNext }: Med
         </button>
 
         <div style={styles.imageContainer}>
-          <img src={imageUrl} alt={item.fileName} style={styles.image} />
+          {isVideo && item.previewPath ? (
+            <div style={{ position: "relative", width: "100%" }}>
+              <video
+                src={videoSrc || streamUrl}
+                controls
+                style={{ ...styles.image, width: "100%", maxHeight: "70vh" }}
+              />
+              <div style={{ marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <span style={{ color: "#fff", fontSize: "0.75rem" }}>Quality:</span>
+                <select
+                  value={videoQuality}
+                  onChange={(e) => setVideoQuality(e.target.value as "preview" | "original")}
+                  style={styles.qualitySelect}
+                >
+                  {item.previewPath && <option value="preview">Preview</option>}
+                  <option value="original">Original</option>
+                </select>
+              </div>
+            </div>
+          ) : (
+            <img src={imageUrl} alt={item.fileName} style={styles.image} />
+          )}
         </div>
 
         <button
@@ -107,6 +136,12 @@ export function MediaDetail({ item, onClose, onNavigate, hasPrev, hasNext }: Med
             <div style={styles.metaItem}>
               <span style={styles.metaLabel}>Dimensions</span>
               <span style={styles.metaValue}>{item.width} × {item.height}</span>
+            </div>
+          )}
+          {item.duration && (
+            <div style={styles.metaItem}>
+              <span style={styles.metaLabel}>Duration</span>
+              <span style={styles.metaValue}>{Math.round(item.duration / 60)}:{String(item.duration % 60).padStart(2, "0")}</span>
             </div>
           )}
           <div style={styles.metaItem}>
@@ -220,6 +255,15 @@ const styles: Record<string, Record<string, string | number>> = {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
     gap: "1rem",
+  },
+  qualitySelect: {
+    backgroundColor: "rgba(255,255,255,0.1)",
+    color: "#fff",
+    border: "1px solid rgba(255,255,255,0.3)",
+    borderRadius: "4px",
+    padding: "0.25rem 0.5rem",
+    fontSize: "0.75rem",
+    cursor: "pointer",
   },
   metaItem: {
     display: "flex",
