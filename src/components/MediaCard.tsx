@@ -29,10 +29,17 @@ export function MediaCard({ item, onClick, isTrash, onRestore, onHardDelete }: M
   const isVideo = item.type === "video";
   const hasAnimatedThumbnail = !!item.animatedThumbnailPath;
 
+  const handleVideoRef = (el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    if (el) {
+      el.play().catch(() => {});
+    }
+  };
+
   const handleMouseEnter = () => {
-    if (isVideo && hasAnimatedThumbnail && videoRef.current) {
+    console.log("[MediaCard] mouseEnter", { isVideo, hasAnimatedThumbnail, hasRef: !!videoRef.current });
+    if (isVideo && hasAnimatedThumbnail) {
       setShowVideo(true);
-      videoRef.current.play().catch(() => {});
     }
   };
 
@@ -63,7 +70,7 @@ export function MediaCard({ item, onClick, isTrash, onRestore, onHardDelete }: M
       >
         {isVideo && hasAnimatedThumbnail && showVideo ? (
           <video
-            ref={videoRef}
+            ref={handleVideoRef}
             src={item.animatedThumbnailPath!}
             style={styles.image}
             muted
