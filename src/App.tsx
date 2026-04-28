@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
+import { useAuth } from "./contexts/AuthContext";
 import { UploadZone } from "./components/UploadZone";
 import { MediaGrid } from "./components/MediaGrid";
 import { MediaDetail } from "./components/MediaDetail";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { UserMenu } from "./components/UserMenu";
+import { LoginPage } from "./pages/LoginPage";
 
 interface MediaItem {
   id: string;
@@ -54,8 +57,10 @@ interface ConfirmState {
 type ViewMode = "browse" | "search" | "trash";
 
 function App() {
+  const { user, loading } = useAuth();
+
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [isLoading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
@@ -326,12 +331,24 @@ function App() {
     setDeleteMode((prev) => !prev);
   };
 
-  const isEmpty = !loading && mediaItems.length === 0;
+  const isEmpty = !isLoading && mediaItems.length === 0;
   const emptyMessage = viewMode === "search"
     ? `No results for "${searchQuery}"`
     : viewMode === "trash"
     ? "Trash is empty"
     : "No media yet";
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+        <p style={{ color: "#666" }}>Loading...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
 
   return (
     <main style={{ minHeight: "100vh", backgroundColor: "#fff" }}>
@@ -343,6 +360,7 @@ function App() {
               Personal image library
             </p>
           </div>
+          <UserMenu />
           {viewMode === "trash" && (
             <button style={styles.backBtn} onClick={goToBrowse}>
               ← Back to Browse
@@ -482,7 +500,7 @@ function App() {
               <p style={styles.emptyText}>{emptyMessage}</p>
             </div>
           ) : (
-            <MediaGrid items={mediaItems} loading={loading} onSelect={handleSelect} />
+            <MediaGrid items={mediaItems} loading={isLoading} onSelect={handleSelect} />
           )}
 
           {totalPages > 1 && !isEmpty && (
